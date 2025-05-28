@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard - Brahma Enterprises</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Firebase Compat SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-storage-compat.js"></script>
+
+  <!-- Firebase Config -->
+  <script src="firebase-config.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f7f7f7;
+      padding: 20px;
+    }
+    h2 {
+      color: #333;
+    }
+    .product-form, .product-list {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    img.preview {
+      max-width: 100px;
+      margin-top: 10px;
+    }
+    .product-card {
+      border: 1px solid #ccc;
+      margin: 10px 0;
+      padding: 15px;
+      border-radius: 8px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Admin Dashboard</h2>
+  <button onclick="logout()">Logout</button>
+
+  <div class="product-form">
+    <h3>Add / Update Product</h3>
+    <input type="text" id="name" placeholder="Product Name">
+    <input type="number" id="price" placeholder="Price">
+    <input type="text" id="category" placeholder="Category">
+    <textarea id="description" placeholder="Description"></textarea>
+    <input type="file" id="image" onchange="previewImage(event)">
+    <img id="image-preview" class="preview" src="" alt="">
+    <input type="hidden" id="product-id">
+    <button onclick="submitProduct()">Save Product</button>
+  </div>
+
+  <div class="product-list" id="product-list">
+    <h3>Product List</h3>
+    <!-- Products will be rendered here -->
+  </div>
+
+  <script>
+    const db = firebase.firestore();
+    const storage = firebase.storage();
+    const auth = firebase.auth();
+
+    // Check login
+    auth.onAuthStateChanged(user => {
+      if (!user) {
+        window.location.href = "admin.html";
+      }
+    });
+
+    function logout() {
+      auth.signOut().then(() => {
+        window.location.href = "admin.html";
+      });
+    }
+
+    function previewImage(event) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        document.getElementById("image-preview").src = reader.result;
+      };
+      reader.readAsDataURL(event.target.files[0]);
+    }
+
+    function submitProduct() {
+      const name = document.getElementById("name").value;
+      const price = document.getElementById("price").value;
+      const category = document.getElementById("category").value;
+      const description = document.getElementById("description").value;
+      const imageFile = document.getElementById("image").files[0];
+      const productId = document.getElementById("product-id").value;
+
+      if (!name || !price || !category || !description || (!imageFile && !productId)) {
+        alert("Please fill all fields and select an image.");
+        return;
+      }
+
+      if (imageFile) {
+        const storageRef = storage.ref(`products/${Date.now()}_${imageFile.name}`);
+        storageRef.put(imageFile).then(snapshot => {
+          snapshot.ref.getDownloadURL().then(url => {
+            saveProduct(name, price, category, description, url, productId);
+          });
+        });
+      } else {
+        const existingImg = document.getElementById("image-preview").src;
+        saveProduct(name, price, category, description, existingImg, productId);
+      }
+    }
+
+    function saveProduct(name, price, category, description, image, id = null) {
+      const data = { name, price, category, description, image };
+      if (id) {
+        db.collection("products").doc(id).update(data).then(() => {
+          alert("Product updated!");
+          resetForm();
+          fetchProducts();
+        });
+      } else {
+        db.collection("products").add(data).then(() => {
+          alert("Product added!");
+          resetForm();
+          fetchProducts();
+        });
+      }
+    }
+
+    function fetchProducts() {
+      const list = document.getElementById("product-list");
+      list.innerHTML = "<h3>Product List</h3>";
+
+      db.collection("products").get().then(snapshot => {
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const div = document.createElement("div");
+          div.className = "product-card";
+          div.innerHTML = `
+            <img src="${data.image}" width="100" />
+            <h4>${data.name}</h4>
+            <p>₹${data.price}</p>
+            <p><strong>${data.category}</strong></p>
+            <p>${data.description}</p>
+            <button onclick="editProduct('${doc.id}', ${JSON.stringify(JSON.stringify(data))})">Edit</button>
+            <button onclick="deleteProduct('${doc.id}')">Delete</button>
+          `;
+          list.appendChild(div);
+        });
+      });
+    }
+
+    function editProduct(id, dataJson) {
+      const data = JSON.parse(JSON.parse(dataJson));
+      document.getElementById("name").value = data.name;
+      document.getElementById("price").value = data.price;
+      document.getElementById("category").value = data.category;
+      document.getElementById("description").value = data.description;
+      document.getElementById("image-preview").src = data.image;
+      document.getElementById("product-id").value = id;
+    }
+
+    function deleteProduct(id) {
+      if (confirm("Delete this product?")) {
+        db.collection("products").doc(id).delete().then(() => {
+          alert("Deleted");
+          fetchProducts();
+        });
+      }
+    }
+
+    function resetForm() {
+      document.getElementById("name").value = "";
+      document.getElementById("price").value = "";
+      document.getElementById("category").value = "";
+      document.getElementById("description").value = "";
+      document.getElementById("image").value = "";
+      document.getElementById("image-preview").src = "";
+      document.getElementById("product-id").value = "";
+    }
+
+    fetchProducts();
+  </script>
+</body>
+</html>
